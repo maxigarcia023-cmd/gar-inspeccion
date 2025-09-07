@@ -119,29 +119,35 @@ DEFAULT_RESUMEN_TEMPLATE = Template(
 # ------------------------- Utilidades Excel y parsing ------------------- #
 
 def cargar_o_crear_excel_bytes(existing_bytes: Optional[bytes], df_rows: pd.DataFrame) -> bytes:
-    """Devuelve un xlsx con la hoja DATOS actualizada, preservando el resto de hojas si subiste un libro."""
+    """Genera un .xlsx con la hoja DATOS actualizada, preservando el resto de hojas si subiste un libro."""
     buf = io.BytesIO()
     if existing_bytes:
-        wb = load_workbook(io.BytesIO(existing_bytes))
-        # Leer hoja DATOS si existe
-        try:
-            existing_df = pd.read_excel(io.BytesIO(existing_bytes), sheet_name="DATOS")
-        except Exception:
-            existing_df = pd.DataFrame(columns=CAMPOS_ORDEN)
-        full = pd.concat([existing_df, df_rows], ignore_index=True)
+        bio = io.BytesIO(existing_bytes)
+        xls = pd.ExcelFile(bio)
+        # Leer todas las hojas existentes, menos DATOS (la vamos a regenerar)
+        hojas_existentes = {
+            name: pd.read_excel(io.BytesIO(existing_bytes), sheet_name=name)
+            for name in xls.sheet_names if name != "DATOS"
+        }
+        # Unir con lo ya existente en DATOS (si está)
+        if "DATOS" in xls.sheet_names:
+            df_exist = pd.read_excel(io.BytesIO(existing_bytes), sheet_name="DATOS")
+        else:
+            df_exist = pd.DataFrame(columns=CAMPOS_ORDEN)
+
+        full = pd.concat([df_exist, df_rows], ignore_index=True)
         full = full[CAMPOS_ORDEN]
-        # Escribir en el mismo workbook y preservar hojas
+
+        # Escribir TODAS las hojas al nuevo libro (sin writer.save())
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            writer.book = wb
-            writer.sheets = {ws.title: ws for ws in wb.worksheets}
+            for nombre, df in hojas_existentes.items():
+                df.to_excel(writer, sheet_name=nombre, index=False)
             full.to_excel(writer, sheet_name="DATOS", index=False)
-            writer.save()
         return buf.getvalue()
     else:
-        # Crear nuevo libro solo con DATOS
+        # Crear nuevo libro solo con DATOS (sin writer.save())
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
             df_rows.to_excel(writer, sheet_name="DATOS", index=False)
-            writer.save()
         return buf.getvalue()
 
 
